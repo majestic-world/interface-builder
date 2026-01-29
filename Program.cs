@@ -4,15 +4,16 @@ namespace InterfaceBuilder;
 
 internal static class InterfaceCompiler
 {
+    private static readonly Dictionary<string, string?> Config = new();
 
-    private static readonly Dictionary<string, string?> Config =  new();
-    
-    private static string? _batchFile;
     private static string? _interfaceDir;
     private static string? _clientDir;
+    private static string[]? _deleteFiles;
 
-    private static void Main(string[] args)
+    private static void Main()
     {
+        Console.Title = "Interface Builder Launcher By Mk";
+
         var lines = File.ReadAllLines("config.properties");
         foreach (var line in lines)
         {
@@ -22,47 +23,42 @@ internal static class InterfaceCompiler
             Config.Add(key, value);
         }
 
-        _batchFile = Config["BatchFile"];
         _interfaceDir = Config["InterfaceDir"];
         _clientDir = Config["ClientDir"];
         
-        Console.WriteLine("=================================");
-        Console.WriteLine("Interface Compiler & Auto-Restart");
-        Console.WriteLine("=================================\n");
+        if (Config.TryGetValue("DeleteFiles", out var deleteFilesConfig) && !string.IsNullOrEmpty(deleteFilesConfig))
+        {
+            _deleteFiles = deleteFilesConfig.Split(',').Select(f => f.Trim()).ToArray();
+        }
+
+        Console.WriteLine(" =================================");
+        Console.WriteLine(" Interface Builder Launcher By Mk");
+        Console.WriteLine(" =================================");
 
         try
         {
             CloseL2Process();
-            
             CompileInterface();
-
             CopyCompiledFile();
-
             StartL2();
-
             Console.WriteLine("================================");
             Console.WriteLine("Processo concluído com sucesso!");
             Console.WriteLine("================================");
-            
-            //Console.ReadKey();
-            //Thread.Sleep(20000);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\n[ERRO] {ex.Message}");
             Console.ResetColor();
+            Console.WriteLine(" Pressione qualquer tecla para sair...");
+            Console.ReadKey();
         }
     }
 
     private static void CloseL2Process()
     {
-        Console.WriteLine("[1/4] Verificando processo L2.exe...");
-
+        Console.WriteLine(" Verificando processo L2.exe...");
         var processes = Process.GetProcessesByName("l2");
-
         if (processes.Length <= 0) return;
-
         foreach (var process in processes)
         {
             try
@@ -71,7 +67,7 @@ internal static class InterfaceCompiler
 
                 if (string.IsNullOrEmpty(processPath)) continue;
                 var processFolder = Path.GetDirectoryName(processPath);
-                    
+
                 if (!string.IsNullOrEmpty(processFolder))
                 {
                 }
@@ -85,96 +81,182 @@ internal static class InterfaceCompiler
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro ao fechar PID {process.Id}: {ex.Message}");
+                Console.WriteLine($" Erro ao fechar PID {process.Id}: {ex.Message}");
             }
         }
     }
 
     private static void CompileInterface()
     {
-        Console.WriteLine("\n[2/4] Compilando interface...");
-
-        if (_interfaceDir != null)
+        Console.WriteLine(" Compilando interface...");
+        if (_interfaceDir == null || _clientDir == null)
         {
-            if (_batchFile != null)
+            throw new InvalidOperationException("InterfaceDir ou ClientDir não configurados");
+        }
+        DeleteCompiledFiles();
+        var uccPath = Path.Combine(_interfaceDir, "UCC.exe");
+        if (!File.Exists(uccPath))
+        {
+            throw new FileNotFoundException($"UCC.exe não encontrado: {uccPath}");
+        }
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = uccPath,
+            Arguments = "make -nobind",
+            WorkingDirectory = _interfaceDir,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = false
+        };
+        
+        var warnings = new List<string>();
+        using var process = new Process();
+        process.StartInfo = startInfo;
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (string.IsNullOrEmpty(e.Data)) return;
+            var line = e.Data;
+            var isError = line.Contains("Error,", StringComparison.OrdinalIgnoreCase) ||
+                          line.Contains("Compile aborted", StringComparison.OrdinalIgnoreCase) ||
+                          line.Contains("Failure -", StringComparison.OrdinalIgnoreCase);
+
+            var isWarning = line.Contains("warning", StringComparison.OrdinalIgnoreCase);
+
+            if (isError)
             {
-                var batchPath = Path.Combine(_interfaceDir, _batchFile);
-
-                if (!File.Exists(batchPath))
+                if (line.Contains(": Error,", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new FileNotFoundException($"Arquivo batch não encontrado: {batchPath}");
-                }
-
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c \"{batchPath}\"",
-                    WorkingDirectory = _interfaceDir,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = false
-                };
-
-                var logLines = new List<string>();
-                var warnings = new List<string>();
-                
-                using var process = new Process();
-                process.StartInfo = startInfo;
-                
-                process.OutputDataReceived += (sender, e) =>
-                {
-                    if (string.IsNullOrEmpty(e.Data)) return;
-                    
-                    var line = e.Data;
-                    logLines.Add(line);
-                    Console.WriteLine($"      {line}");
-                    
-                    // Detecta warnings (case-insensitive)
-                    if (line.Contains("warning", StringComparison.OrdinalIgnoreCase) ||
-                        line.Contains("aviso", StringComparison.OrdinalIgnoreCase))
+                    var parts = line.Split([": Error,"], StringSplitOptions.None);
+                    if (parts.Length == 2)
                     {
-                        warnings.Add(line);
+                        var filePath = parts[0].Trim();
+
+                        var basePath = Path.GetDirectoryName(_interfaceDir);
+                        if (!string.IsNullOrEmpty(basePath))
+                        {
+                            basePath = basePath.TrimEnd('\\', '/') + "\\";
+                            if (filePath.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                filePath = filePath.Substring(basePath.Length);
+                            }
+                        }
+                        
+                        if (filePath.StartsWith("Interface\\", StringComparison.OrdinalIgnoreCase))
+                        {
+                            filePath = filePath.Substring("Interface\\".Length);
+                        }
+
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($" {filePath}: Error,{parts[1]}");
+                        Console.ResetColor();
                     }
-                };
-
-                process.ErrorDataReceived += (sender, e) =>
-                {
-                    if (string.IsNullOrEmpty(e.Data)) return;
-                    
-                    var line = e.Data;
-                    var errorLine = $"[ERROR] {line}";
-                    logLines.Add(errorLine);
-                    
-                    // Todos os erros são considerados warnings também
-                    warnings.Add(errorLine);
-                    
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"      {line}");
-                    Console.ResetColor();
-                };
-
-                process.Start();
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
-                process.WaitForExit();
-
-                // Salva o log completo e os warnings
-                SaveCompilationLog(logLines, warnings);
-
-                if (process.ExitCode != 0)
-                {
-                    Console.WriteLine("Pressione qualquer tecla para sair...");
-                    Console.ReadKey();
-                    throw new Exception($"Compilação falhou com código de saída: {process.ExitCode}");
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($" {line}");
+                        Console.ResetColor();
+                    }
                 }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($" {line}");
+                    Console.ResetColor();
+                }
+
+                warnings.Add(line);
             }
+            else if (isWarning)
+            {
+                if (line.Contains(": Warning,", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parts = line.Split([": Warning,"], StringSplitOptions.None);
+                    if (parts.Length == 2)
+                    {
+                        var filePath = parts[0].Trim();
+
+                        var basePath = Path.GetDirectoryName(_interfaceDir);
+                        if (!string.IsNullOrEmpty(basePath))
+                        {
+                            basePath = basePath.TrimEnd('\\', '/') + "\\";
+                            if (filePath.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                filePath = filePath.Substring(basePath.Length);
+                            }
+                        }
+                        
+                        if (filePath.StartsWith("Interface\\", StringComparison.OrdinalIgnoreCase))
+                        {
+                            filePath = filePath.Substring("Interface\\".Length);
+                        }
+
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($" {filePath}: Warning,{parts[1]}");
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($" {line}");
+                    }
+
+                    Console.ResetColor();
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($" {line}");
+                    Console.ResetColor();
+                }
+
+                warnings.Add(line);
+            }
+            else
+            {
+                Console.WriteLine($" {line}");
+            }
+        };
+
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (string.IsNullOrEmpty(e.Data)) return;
+            var line = e.Data;
+            var errorLine = $"[ERROR] {line}";
+            warnings.Add(errorLine);
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($" {line}");
+            Console.ResetColor();
+        };
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        process.WaitForExit();
+
+        SaveCompilationLog(warnings);
+
+        if (process.ExitCode != 0)
+        {
+            throw new Exception($"Compilação falhou com código de saída: {process.ExitCode}");
         }
 
-        Console.WriteLine("\nCompilação concluída");
+        Console.WriteLine(" Compilação concluída");
     }
 
-    private static void SaveCompilationLog(List<string> allLines, List<string> warnings)
+    private static void DeleteCompiledFiles()
+    {
+        if (_interfaceDir == null) return;
+        if (_deleteFiles == null || _deleteFiles.Length == 0) return;
+        foreach (var fileName in _deleteFiles)
+        {
+            var filePath = Path.Combine(_interfaceDir, fileName);
+
+            if (!File.Exists(filePath)) continue;
+            File.Delete(filePath);
+        }
+    }
+
+    private static void SaveCompilationLog(List<string> warnings)
     {
         try
         {
@@ -183,13 +265,13 @@ internal static class InterfaceCompiler
 
             if (warnings.Count <= 0) return;
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                
+
             using var writer = new StreamWriter(logPath, false);
             writer.WriteLine("========================================");
             writer.WriteLine($"Log de Compilação - {timestamp}");
             writer.WriteLine("========================================\n");
             writer.WriteLine("=== WARNINGS E ERROS ===\n");
-                
+
             foreach (var warning in warnings)
             {
                 writer.WriteLine(warning);
@@ -204,8 +286,7 @@ internal static class InterfaceCompiler
 
     private static void CopyCompiledFile()
     {
-        Console.WriteLine("\n[3/4] Copiando arquivo compilado...");
-
+        Console.WriteLine(" Copiando arquivo compilado...");
         if (_interfaceDir == null) return;
         var sourceFile = Path.Combine(_interfaceDir, "interface.u");
         if (_clientDir == null) return;
@@ -238,7 +319,7 @@ internal static class InterfaceCompiler
 
     private static void StartL2()
     {
-        Console.WriteLine("\n[4/4] Iniciando L2.exe...");
+        Console.WriteLine(" Iniciando L2.exe...");
 
         if (_clientDir != null)
         {
@@ -259,6 +340,6 @@ internal static class InterfaceCompiler
             Process.Start(startInfo);
         }
 
-        Console.WriteLine("L2.exe iniciado\n");
+        Console.WriteLine("L2.exe iniciado");
     }
 }
