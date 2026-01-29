@@ -1,5 +1,13 @@
-﻿Interface builder helper
+﻿# Interface Builder Helper
 
-Dotnet 10 with native AOT
+> A lightweight interface builder utility built with .NET 10 and Native AOT compilation
 
-Build: dotnet publish -c Release -r win-x64
+## 🚀 Technology Stack
+
+- **.NET 10** with Native AOT support
+
+## 📦 Build
+
+```bash
+dotnet publish -c Release -r win-x64
+```
