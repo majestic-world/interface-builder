@@ -182,30 +182,41 @@ fn compile_interface(interface_dir: &str, _client_dir: &str, delete_files: &[Str
     if use_strip {
         println!(" Stripping interface...");
         
-        let strip_output1 = Command::new(&ucc_path)
-            .arg("editor.stripsource")
-            .arg("Interface.u")
-            .arg("--nobind")
+        // Execute through cmd /c to avoid UCC.exe bugs with quoted absolute paths when there are spaces
+        let strip_output1 = Command::new("cmd")
+            .arg("/c")
+            .arg("UCC.exe editor.stripsource Interface.u -nobind")
             .current_dir(interface_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .status()?;
+            .output()?;
             
-        if !strip_output1.success() {
+        if !strip_output1.status.success() {
             println!(" {}", "Warning: editor.stripsource failed".yellow());
+            let err = String::from_utf8_lossy(&strip_output1.stdout);
+            for line in err.lines() {
+                println!("   {}", line.yellow());
+            }
+            let err2 = String::from_utf8_lossy(&strip_output1.stderr);
+            for line in err2.lines() {
+                println!("   {}", line.red());
+            }
         }
 
-        let strip_output2 = Command::new(&ucc_path)
-            .arg("editor.stripsourcecommandlet")
-            .arg("Interface.u")
-            .arg("--nobind")
+        let strip_output2 = Command::new("cmd")
+            .arg("/c")
+            .arg("UCC.exe editor.stripsourcecommandlet Interface.u -nobind")
             .current_dir(interface_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .status()?;
+            .output()?;
             
-        if !strip_output2.success() {
+        if !strip_output2.status.success() {
             println!(" {}", "Warning: editor.stripsourcecommandlet failed".yellow());
+            let err = String::from_utf8_lossy(&strip_output2.stdout);
+            for line in err.lines() {
+                println!("   {}", line.yellow());
+            }
+            let err2 = String::from_utf8_lossy(&strip_output2.stderr);
+            for line in err2.lines() {
+                println!("   {}", line.red());
+            }
         }
     }
 
