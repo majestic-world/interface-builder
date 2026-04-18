@@ -1,13 +1,13 @@
-﻿# Interface Builder Helper
+# Interface Builder Helper
 
-> A lightweight interface builder utility built with .NET 10 and Native AOT compilation
+> A lightweight interface builder utility built with Rust
 
 ## 🚀 Technology Stack
 
-- **.NET 10** with Native AOT support
+- **Rust**
 
 ## 📦 Build
 
 ```bash
-dotnet publish -c Release -r win-x64
+cargo build --release
 ```
