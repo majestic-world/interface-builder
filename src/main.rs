@@ -51,7 +51,9 @@ fn main() {
         .map(|s| s.split(',').map(|f| f.trim().to_string()).filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
 
-    if let Err(e) = run_process(&interface_dir, &client_dir, &delete_files) {
+    let use_strip = config.get("UseStrip").map(|s| s.to_lowercase() == "true").unwrap_or(false);
+
+    if let Err(e) = run_process(&interface_dir, &client_dir, &delete_files, use_strip) {
         eprintln!("\n Error: {}", e);
         pause();
     } else {
@@ -81,9 +83,9 @@ fn load_config() -> io::Result<HashMap<String, String>> {
     Ok(config)
 }
 
-fn run_process(interface_dir: &str, client_dir: &str, delete_files: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn run_process(interface_dir: &str, client_dir: &str, delete_files: &[String], use_strip: bool) -> Result<(), Box<dyn std::error::Error>> {
     close_l2_process(client_dir);
-    compile_interface(interface_dir, client_dir, delete_files)?;
+    compile_interface(interface_dir, client_dir, delete_files, use_strip)?;
     copy_compiled_file(interface_dir, client_dir)?;
     start_l2(client_dir)?;
     Ok(())
@@ -111,7 +113,7 @@ fn close_l2_process(client_dir: &str) {
     }
 }
 
-fn compile_interface(interface_dir: &str, _client_dir: &str, delete_files: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn compile_interface(interface_dir: &str, _client_dir: &str, delete_files: &[String], use_strip: bool) -> Result<(), Box<dyn std::error::Error>> {
     println!(" Compiling interface...");
     
     for file_to_delete in delete_files {
@@ -175,6 +177,36 @@ fn compile_interface(interface_dir: &str, _client_dir: &str, delete_files: &[Str
 
     if !status.success() {
         return Err(format!("Compilation failed with exit code: {}", status.code().unwrap_or(-1)).into());
+    }
+
+    if use_strip {
+        println!(" Stripping interface...");
+        
+        let strip_output1 = Command::new(&ucc_path)
+            .arg("editor.stripsource")
+            .arg("Interface.u")
+            .arg("--nobind")
+            .current_dir(interface_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .status()?;
+            
+        if !strip_output1.success() {
+            println!(" {}", "Warning: editor.stripsource failed".yellow());
+        }
+
+        let strip_output2 = Command::new(&ucc_path)
+            .arg("editor.stripsourcecommandlet")
+            .arg("Interface.u")
+            .arg("--nobind")
+            .current_dir(interface_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .status()?;
+            
+        if !strip_output2.success() {
+            println!(" {}", "Warning: editor.stripsourcecommandlet failed".yellow());
+        }
     }
 
     println!(" Compilation completed");
